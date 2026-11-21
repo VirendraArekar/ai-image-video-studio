@@ -1,0 +1,414 @@
+// Prisma Schema for AI Image & Video Studio
+// MySQL Primary Database
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum PlanTier {
+  FREE
+  STARTER
+  CREATOR
+  PRO_STUDIO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAST_DUE
+}
+
+enum CreditTransactionType {
+  SIGNUP_BONUS
+  PACKAGE_PURCHASE
+  SUBSCRIPTION_RECHARGE
+  IMAGE_GENERATION
+  VIDEO_GENERATION
+  PROMPT_ENHANCE
+  ADMIN_ADJUSTMENT
+  REFUND
+}
+
+enum JobType {
+  IMAGE_TEXT_TO_IMAGE
+  IMAGE_TO_IMAGE
+  IMAGE_EDIT
+  VIDEO_TEXT_TO_VIDEO
+  VIDEO_IMAGE_TO_VIDEO
+  VIDEO_KEYFRAME
+  VIDEO_EXTENSION
+  VIDEO_EDIT
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AbuseReportStatus {
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+model User {
+  id                    String              @id @default(uuid())
+  email                 String              @unique
+  passwordHash          String
+  name                  String
+  role                  Role                @default(USER)
+  status                UserStatus          @default(ACTIVE)
+  avatarUrl             String?
+  emailVerified         Boolean             @default(false)
+  verificationToken     String?
+  resetPasswordToken    String?
+  resetPasswordExpires  DateTime?
+  refreshTokenHash      String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  profile               UserProfile?
+  subscription          Subscription?
+  wallet                CreditWallet?
+  jobs                  GenerationJob[]
+  media                 GeneratedMedia[]
+  favourites            FavouriteMedia[]
+  payments              PaymentTransaction[]
+  usageLogs             ApiUsageLog[]
+  auditLogs             AuditLog[]          @relation("UserAuditLogs")
+  abuseReports          AbuseReport[]       @relation("ReportedByUser")
+  adminUser             AdminUser?
+  customPrompts         PromptTemplate[]    @relation("UserPrompts")
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model UserProfile {
+  id                    String              @id @default(uuid())
+  userId                String              @unique
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio                   String?             @db.Text
+  preferences           Json?
+  defaultImageModel     String?             @default("gemini-nano-banana-2.1")
+  defaultVideoModel     String?             @default("gemini-omni-1.2-flash")
+  notificationsEnabled  Boolean             @default(true)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@map("user_profiles")
+}
+
+model Subscription {
+  id                    String              @id @default(uuid())
+  userId                String              @unique
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planTier              PlanTier            @default(FREE)
+  status                SubscriptionStatus  @default(ACTIVE)
+  monthlyCredits        Int                 @default(50)
+  currentPeriodStart    DateTime            @default(now())
+  currentPeriodEnd      DateTime
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  cancelledAt           DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model CreditWallet {
+  id                    String              @id @default(uuid())
+  userId                String              @unique
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance               Int                 @default(50)
+  lifetimeGranted       Int                 @default(50)
+  lifetimeSpent         Int                 @default(0)
+  lastRechargeAt        DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  transactions          CreditTransaction[]
+
+  @@index([userId])
+  @@map("credit_wallets")
+}
+
+model CreditTransaction {
+  id                    String                @id @default(uuid())
+  walletId              String
+  wallet                CreditWallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount                Int
+  balanceAfter          Int
+  type                  CreditTransactionType
+  description           String
+  referenceId           String?
+  metadata              Json?
+  createdAt             DateTime              @default(now())
+
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("credit_transactions")
+}
+
+model GenerationJob {
+  id                    String              @id @default(uuid())
+  userId                String
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                  JobType
+  status                JobStatus           @default(PENDING)
+  provider              String              @default("GEMINI")
+  modelId               String
+  prompt                String              @db.Text
+  negativePrompt        String?             @db.Text
+  creditCost            Int                 @default(1)
+  progress              Int                 @default(0)
+  errorMessage          String?             @db.Text
+  retryCount            Int                 @default(0)
+  queueJobId            String?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  generatedMedia        GeneratedMedia[]
+  parameters            GenerationParameter?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([modelId])
+  @@map("generation_jobs")
+}
+
+model GeneratedMedia {
+  id                    String              @id @default(uuid())
+  userId                String
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId                 String?
+  job                   GenerationJob?      @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  mediaType             MediaType
+  storagePath           String
+  publicUrl             String
+  mimeType              String
+  width                 Int?
+  height                Int?
+  durationSeconds       Float?
+  fileSize              Int?
+  thumbnailPath         String?
+  thumbnailUrl          String?
+  isFavourite           Boolean             @default(false)
+  isPublic              Boolean             @default(true)
+  viewsCount            Int                 @default(0)
+  downloadsCount        Int                 @default(0)
+  deletedAt             DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  parameters            GenerationParameter?
+  favourites            FavouriteMedia[]
+  abuseReports          AbuseReport[]
+
+  @@index([userId])
+  @@index([mediaType])
+  @@index([isFavourite])
+  @@index([createdAt])
+  @@map("generated_media")
+}
+
+model GenerationParameter {
+  id                    String              @id @default(uuid())
+  mediaId               String?             @unique
+  media                 GeneratedMedia?     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  jobId                 String?             @unique
+  job                   GenerationJob?      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  aspectRatio           String?             @default("1:1")
+  resolution            String?             @default("720p")
+  guidanceScale         Float?
+  seed                  BigInt?
+  steps                 Int?
+  sampleCount           Int                 @default(1)
+  firstFrameUrl         String?             @db.Text
+  lastFrameUrl          String?             @db.Text
+  referenceImageUrl     String?             @db.Text
+  referenceVideoUrl     String?             @db.Text
+  rawRequest            Json?
+  rawResponseMetadata   Json?
+  createdAt             DateTime            @default(now())
+
+  @@map("generation_parameters")
+}
+
+model PromptTemplate {
+  id                    String              @id @default(uuid())
+  title                 String
+  prompt                String              @db.Text
+  negativePrompt        String?             @db.Text
+  category              String
+  tags                  Json?
+  previewImageUrl       String?
+  usageCount            Int                 @default(0)
+  isSystemDefault       Boolean             @default(false)
+  authorId              String?
+  author                User?               @relation("UserPrompts", fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([category])
+  @@index([isSystemDefault])
+  @@map("prompt_templates")
+}
+
+model FavouriteMedia {
+  id                    String              @id @default(uuid())
+  userId                String
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId               String
+  media                 GeneratedMedia      @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  createdAt             DateTime            @default(now())
+
+  @@unique([userId, mediaId])
+  @@index([userId])
+  @@map("favourite_media")
+}
+
+model PaymentTransaction {
+  id                    String              @id @default(uuid())
+  userId                String
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount                Int                 // in cents
+  currency              String              @default("USD")
+  creditsPurchased      Int
+  status                PaymentStatus       @default(PENDING)
+  paymentMethod         String              @default("card")
+  providerTransactionId String?
+  metadata              Json?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("payment_transactions")
+}
+
+model ApiUsageLog {
+  id                    String              @id @default(uuid())
+  userId                String?
+  user                  User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  endpoint              String
+  modelId               String?
+  tokensInput           Int?                @default(0)
+  tokensOutput          Int?                @default(0)
+  latencyMs             Int
+  statusCode            Int
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime            @default(now())
+
+  @@index([userId])
+  @@index([endpoint])
+  @@index([createdAt])
+  @@map("api_usage_logs")
+}
+
+model AdminUser {
+  id                    String              @id @default(uuid())
+  userId                String              @unique
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissions           Json
+  lastLoginAt           DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@map("admin_users")
+}
+
+model AuditLog {
+  id                    String              @id @default(uuid())
+  actorId               String?
+  actor                 User?               @relation("UserAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  action                String
+  targetType            String
+  targetId              String?
+  details               Json?
+  ipAddress             String?
+  createdAt             DateTime            @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AbuseReport {
+  id                    String              @id @default(uuid())
+  reporterId            String
+  reporter              User                @relation("ReportedByUser", fields: [reporterId], references: [id], onDelete: Cascade)
+  mediaId               String
+  media                 GeneratedMedia      @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  reason                String
+  status                AbuseReportStatus   @default(PENDING)
+  adminNotes            String?             @db.Text
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([status])
+  @@index([reporterId])
+  @@map("abuse_reports")
+}
+
+model ModelConfig {
+  id                    String              @id @default(uuid())
+  modelId               String              @unique
+  name                  String
+  provider              String              @default("Google Gemini")
+  mediaType             MediaType
+  isEnabled             Boolean             @default(true)
+  baseCreditCost        Int                 @default(1)
+  description           String              @db.Text
+  capabilities          Json
+  maxDuration           Int?                @default(15)
+  maxResolution         String?             @default("1080p")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@map("model_configs")
+}
