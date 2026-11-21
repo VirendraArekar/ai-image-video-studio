@@ -1,0 +1,21 @@
+{
+  "name": "ai-studio-platform",
+  "version": "1.0.0",
+  "description": "AI Image & Video Studio",
+  "private": true,
+  "scripts": {
+    "dev:backend": "cd backend && npm run start:dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "test:backend": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test",
+    "test": "npm run test:backend && npm run test:frontend",
+    "prisma:generate": "cd backend && npx prisma generate",
+    "prisma:seed": "cd backend && npx ts-node prisma/seed.ts",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  }
+}
