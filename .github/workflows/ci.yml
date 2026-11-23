@@ -1,0 +1,82 @@
+name: CI / CD Pipeline
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend-checks:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: unsensored_ai_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: backend/package.json
+
+      - name: Install backend dependencies
+        run: cd backend && npm ci
+
+      - name: Generate Prisma client
+        run: cd backend && npx prisma generate
+        env:
+          DATABASE_URL: "mysql://root:rootpassword@localhost:3306/unsensored_ai_test"
+
+      - name: Push Prisma schema to test DB
+        run: cd backend && npx prisma db push --skip-generate
+        env:
+          DATABASE_URL: "mysql://root:rootpassword@localhost:3306/unsensored_ai_test"
+
+      - name: Run backend unit tests
+        run: cd backend && npm test
+
+      - name: Build backend
+        run: cd backend && npm run build
+
+  frontend-checks:
+    name: Frontend Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run frontend unit tests
+        run: cd frontend && npm test
+
+      - name: Build frontend production bundle
+        run: cd frontend && npm run build
