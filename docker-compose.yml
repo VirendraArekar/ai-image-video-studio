@@ -1,0 +1,86 @@
+name: ai-studio
+
+services:
+  # MySQL Primary Database
+  mysql:
+    image: mysql:8.0
+    container_name: studio-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: unsensored_ai
+      MYSQL_USER: studio_user
+      MYSQL_PASSWORD: studio_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Redis for BullMQ Queue & Caching
+  redis:
+    image: redis:7-alpine
+    container_name: studio-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NestJS Backend API (Auto-migrates & seeds on startup)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: studio-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "mysql://studio_user:studio_password@mysql:3306/unsensored_ai"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: "${JWT_SECRET:-XYVc2wXvfP4IOMAMzMSREFtNJDdugUhLGU9qXnInTB8=}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:-0sH3SMPUMfIktCkRSxl1xSfHfAXDAC8+gfEriTq2TPY=}"
+      QWEN_API_KEY: "${QWEN_API_KEY:-}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      QWEN_BASE_URL: "${QWEN_BASE_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}"
+      GOOGLE_GEMINI_API_KEY: "${GOOGLE_GEMINI_API_KEY:-}"
+      UPLOAD_DIR: "/app/uploads"
+      BACKEND_PUBLIC_URL: "http://localhost:3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - backend_uploads:/app/uploads
+
+  # React Frontend Application (Nginx reverse proxy on ports 80 & 5173)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: studio-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "5173:80"
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_uploads:
